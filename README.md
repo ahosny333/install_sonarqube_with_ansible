@@ -58,7 +58,7 @@ Execute the Ansible playbook:
 ```bash
 ansible-playbook -i inventory sonar.yml
 ```
-#### 4️⃣ Verify the Installation  
+### 4️⃣ Verify the Installation  
 
 Check the SonarQube service status:  
 
