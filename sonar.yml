@@ -1,0 +1,148 @@
+- name: Install and Configure SonarQube
+  hosts: local
+  become: yes
+  vars:
+    pw: ahmed
+    sonarqube_version: "9.9.0.65466"
+  tasks:
+    - name: Install Required Packages
+      apt:
+        name: "{{ item }}"
+        state: present
+      loop:
+        - openjdk-11-jdk
+        - wget
+        - unzip
+        - postgresql
+        - postgresql-contrib
+
+    - name: Install required packages
+      apt:
+        name:
+          - python3
+          - python3-psycopg2
+        state: present
+
+    - name: Start and enable PostgreSQL service
+      systemd:
+        name: postgresql
+        state: started
+        enabled: yes
+
+    - name: Create SonarQube Database User
+      become_user: postgres
+      postgresql_user:
+        name: sonar
+        password: "{{ pw }}"
+        state: present
+
+    - name: Create SonarQube Database
+      become_user: postgres
+      postgresql_db:
+        name: sonarqube
+        owner: sonar
+        encoding: UTF-8
+        state: present
+
+    - name: Grant All Privileges on SonarQube Database to Sonar User
+      become_user: postgres
+      postgresql_privs:
+        db: sonarqube
+        roles: sonar
+        objs: sonarqube
+        type: database
+        privs: ALL
+
+    - name: Download SonarQube
+      get_url:
+        url: "https://binaries.sonarsource.com/Distribution/sonarqube/sonarqube-{{ sonarqube_version }}.zip"
+        dest: "/tmp/sonarqube.zip"
+
+    - name: Unzip SonarQube
+      unarchive:
+        src: "/tmp/sonarqube.zip"
+        dest: "/opt/"
+        remote_src: yes
+
+    - name: Configure SonarQube Database Connection
+      lineinfile:
+        path: "/opt/sonarqube-{{ sonarqube_version }}/conf/sonar.properties"
+        regexp: '^#sonar.jdbc.url=jdbc:postgresql'
+        line: "sonar.jdbc.url=jdbc:postgresql://localhost:5432/sonarqube"
+        state: present
+
+    - name: Configure SonarQube Database Credentials
+      lineinfile:
+        path: "/opt/sonarqube-{{ sonarqube_version }}/conf/sonar.properties"
+        regexp: '^#sonar.jdbc.username='
+        line: "sonar.jdbc.username=sonar"
+        state: present
+
+    - name: Set SonarQube Database Password
+      lineinfile:
+        path: "/opt/sonarqube-{{ sonarqube_version }}/conf/sonar.properties"
+        regexp: '^#sonar.jdbc.password='
+        line: "sonar.jdbc.password={{ pw }}"
+        state: present
+
+    - name: Set SonarQube webserver
+      lineinfile:
+        path: "/opt/sonarqube-{{ sonarqube_version }}/conf/sonar.properties"
+        regexp: '^#sonar.web.host='
+        line: "sonar.web.host=0.0.0.0"
+        state: present
+
+    - name: Create a Non-Root User for SonarQube
+      ansible.builtin.user:
+        name: sonar
+        system: yes
+        create_home: yes
+        home: /opt/sonarqube-{{ sonarqube_version }}
+        shell: /bin/bash
+
+    - name: Set Permissions for SonarQube Installation Directory
+      ansible.builtin.file:
+        path: /opt/sonarqube-{{ sonarqube_version }}
+        owner: sonar
+        group: sonar
+        recurse: yes
+        mode: '0755'
+
+    - name: Create SonarQube systemd service file
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/sonarqube.service
+        content: |
+          [Unit]
+          Description=SonarQube Service
+          After=network.target
+
+          [Service]
+          Type=forking
+          User=sonar
+          Group=sonar
+          #nvironment="JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64"
+          #Environment="SONAR_JAVA_OPTS=-Xmx512m -Xms128m"
+          ExecStart=/opt/sonarqube-{{ sonarqube_version }}/bin/linux-x86-64/sonar.sh start
+          ExecStop=/opt/sonarqube-{{ sonarqube_version }}/bin/linux-x86-64/sonar.sh stop
+          Restart=always
+          RestartSec=30s
+          LimitNOFILE=65536
+          TimeoutSec=300
+          WorkingDirectory=/opt/sonarqube-{{ sonarqube_version }}
+
+          [Install]
+          WantedBy=multi-user.target
+
+    - name: Reload systemd to recognize the new service
+      ansible.builtin.systemd:
+        daemon_reload: yes
+
+    - name: Enable SonarQube service to start on boot
+      ansible.builtin.systemd:
+        name: sonarqube
+        enabled: yes
+
+    - name: Start SonarQube service
+      ansible.builtin.systemd:
+        name: sonarqube
+        state: started
