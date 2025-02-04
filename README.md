@@ -97,7 +97,7 @@ journalctl -u sonarqube -f
 ```bash
 systemctl status postgresql
 ```
-### Verify Java version  
+#### Verify Java version  
 ```bash
 java -version
 ```
